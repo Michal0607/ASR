@@ -6,11 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - ASR_MODEL=base
+      - ASR_MODEL=large-v2
     ports:
       - "9000:9000"
     volumes:
       - ./app:/app/app
+      - ./100_:/app/100_
       - cache-pip:/root/.cache/pip
       - cache-poetry:/root/.cache/poetry
       - cache-whisper:/root/.cache/whisper

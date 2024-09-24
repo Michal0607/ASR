@@ -23,15 +23,18 @@ ffmpeg-python = "^0.2.0"
 fastapi = "^0.111.0"
 llvmlite = "^0.43.0"
 numba = "^0.60.0"
+numpy = "<2.0.0"
 openai-whisper = "^20231117"
 faster-whisper = "^1.0.3"
+transformers="4.44.2"
+peft = { git = "https://github.com/huggingface/peft.git", branch = "main" }
 torch = [
   { markers = "sys_platform == 'darwin' and platform_machine == 'arm64'", url = "https://download.pytorch.org/whl/cpu/torch-1.13.1-cp310-none-macosx_11_0_arm64.whl" },
   { markers = "sys_platform == 'linux' and platform_machine == 'arm64'", url = "https://download.pytorch.org/whl/cpu/torch-1.13.1-cp310-none-macosx_11_0_arm64.whl" },
   { markers = "sys_platform == 'darwin' and platform_machine == 'x86_64'", url = "https://download.pytorch.org/whl/cpu/torch-1.13.1-cp310-none-macosx_10_9_x86_64.whl" },
   { markers = "sys_platform == 'linux' and platform_machine == 'aarch64'", url = "https://download.pytorch.org/whl/torch-1.13.1-cp310-cp310-manylinux2014_aarch64.whl" },
   { markers = "sys_platform == 'linux' and platform_machine == 'x86_64'", url = "https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp310-cp310-linux_x86_64.whl" },
-  { markers = "sys_platform == 'win' and platform_machine == 'amd64'", url = "https://download.pytorch.org/whl/cpu/torch-1.13.1%2Bcpu-cp310-cp310-win_amd64.whl" },
+  { markers = "sys_platform == 'win' and platform_machine == 'amd64'", url = "https://download.pytorch.org/whl/cpu/torch-2.4.0%2Bcpu-cp310-cp310-win_amd64.whl" },
 ]
 
 [tool.poetry.dev-dependencies]
