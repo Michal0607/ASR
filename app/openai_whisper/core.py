@@ -3,7 +3,7 @@ from io import StringIO, BytesIO
 from threading import Lock
 from typing import BinaryIO, Union
 import torch
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import WhisperForConditionalGeneration, WhisperProcessor, pipeline
 from peft import PeftModel, PeftConfig
 from safetensors.torch import safe_open
 from whisper.utils import WriteTXT, WriteSRT, WriteVTT, WriteTSV, WriteJSON, ResultWriter
@@ -16,7 +16,6 @@ peft_config = PeftConfig.from_pretrained(model_path)
 base_model = WhisperForConditionalGeneration.from_pretrained(processor_path)
 
 model = PeftModel(base_model, peft_config)
-print(model.peft_config)
 
 processor = WhisperProcessor.from_pretrained(processor_path)
 
@@ -34,85 +33,63 @@ def transcribe(
         word_timestamps: Union[bool, None],
         output,
 ):
-    generation_kwargs = {}
-
+    # Ustawienie języka i zadania w konfiguracji modelu
     if language:
         model.config.language = language
     if task:
         model.config.task = task
 
+    # Inicjalizacja pipeline
+    asr_pipeline = pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        device=0 if torch.cuda.is_available() else -1
+    )
+
+    generation_kwargs = {}
+
     if initial_prompt:
-        generation_kwargs["prompt"] = initial_prompt
-
-    generation_kwargs["return_dict_in_generate"] = True
-
+        # Konwertuj initial_prompt na identyfikatory tokenów
+        prompt_ids = processor.tokenizer.encode(initial_prompt, add_special_tokens=False)
+        generation_kwargs["decoder_prompt_ids"] = prompt_ids
     if word_timestamps:
         generation_kwargs["return_timestamps"] = "word"
-        generation_kwargs["use_cache"] = False 
-    else:
-        pass
+        generation_kwargs["chunk_length_s"] = 30.0  # Dostosuj w razie potrzeby
 
-    inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
-    input_features = inputs.input_features.to(device)
+    result = asr_pipeline(
+        audio,
+        **generation_kwargs
+    )
 
-    with model_lock:
-        outputs = model.generate(input_features, **generation_kwargs)
-
+    text = result['text']
     if word_timestamps:
-        if hasattr(outputs, 'timestamps') and outputs.timestamps is not None:
-            transcription = processor.decode(outputs.sequences[0], skip_special_tokens=True)
-            word_offsets_list = outputs.timestamps[0] 
+        word_timestamps_list = result['chunks']
 
-            result = {'text': transcription, 'segments': []}
-            for i, word_info in enumerate(word_offsets_list):
-                start_time = word_info['start']
-                end_time = word_info['end']
-                word = word_info['word']
-                result['segments'].append({
-                    'id': i,
-                    'seek': 0,
-                    'start': start_time,
-                    'end': end_time,
-                    'text': word,
-                    'tokens': [],
-                    'temperature': 0.0,
-                    'avg_logprob': 0.0,
-                    'compression_ratio': 0.0,
-                    'no_speech_prob': 0.0,
-                })
-        else:
-            print("Nie udało się uzyskać znaczników czasowych słów.")
-            transcription = processor.decode(outputs.sequences[0], skip_special_tokens=True)
-            result = {
-                'text': transcription,
-                'segments': [{
-                    'id': 0,
-                    'seek': 0,
-                    'start': 0.0,
-                    'end': 0.0,
-                    'text': transcription,
-                    'tokens': [],
-                    'temperature': 0.0,
-                    'avg_logprob': 0.0,
-                    'compression_ratio': 0.0,
-                    'no_speech_prob': 0.0,
-                }]
-            }
+        result = {'text': text, 'segments': []}
+        for i, word_info in enumerate(word_timestamps_list):
+            start_time = word_info['timestamp'][0]
+            end_time = word_info['timestamp'][1]
+            word = word_info['text']
+            result['segments'].append({
+                'id': i,
+                'seek': 0,
+                'start': start_time,
+                'end': end_time,
+                'text': word,
+                # Dodatkowe pola, jeśli potrzebne
+            })
     else:
-        transcription = processor.decode(outputs.sequences[0], skip_special_tokens=True)
         result = {
-            'text': transcription,
+            'text': text,
             'segments': [{
                 'id': 0,
                 'seek': 0,
                 'start': 0.0,
                 'end': 0.0,
-                'text': transcription,
-                'tokens': [],
-                'temperature': 0.0,
-                'avg_logprob': 0.0,
-                'compression_ratio': 0.0,
-                'no_speech_prob': 0.0,
+                'text': text,
+                # Dodatkowe pola, jeśli potrzebne
             }]
         }
 
@@ -121,6 +98,7 @@ def transcribe(
     output_file.seek(0)
 
     return output_file
+
 
 def language_detection(audio):
     inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
