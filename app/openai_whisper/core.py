@@ -33,13 +33,11 @@ def transcribe(
         word_timestamps: Union[bool, None],
         output,
 ):
-    # Ustawienie języka i zadania w konfiguracji modelu
     if language:
         model.config.language = language
     if task:
         model.config.task = task
 
-    # Inicjalizacja pipeline
     asr_pipeline = pipeline(
         "automatic-speech-recognition",
         model=model,
@@ -51,12 +49,11 @@ def transcribe(
     generation_kwargs = {}
 
     if initial_prompt:
-        # Konwertuj initial_prompt na identyfikatory tokenów
         prompt_ids = processor.tokenizer.encode(initial_prompt, add_special_tokens=False)
         generation_kwargs["decoder_prompt_ids"] = prompt_ids
     if word_timestamps:
         generation_kwargs["return_timestamps"] = "word"
-        generation_kwargs["chunk_length_s"] = 30.0  # Dostosuj w razie potrzeby
+        generation_kwargs["chunk_length_s"] = 30.0 
 
     result = asr_pipeline(
         audio,
@@ -78,7 +75,6 @@ def transcribe(
                 'start': start_time,
                 'end': end_time,
                 'text': word,
-                # Dodatkowe pola, jeśli potrzebne
             })
     else:
         result = {
@@ -89,7 +85,6 @@ def transcribe(
                 'start': 0.0,
                 'end': 0.0,
                 'text': text,
-                # Dodatkowe pola, jeśli potrzebne
             }]
         }
 
