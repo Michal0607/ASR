@@ -53,7 +53,7 @@ def transcribe(
 
     if word_timestamps:
         generation_kwargs["return_timestamps"] = "word"
-        generation_kwargs["chunk_length_s"] = 30.0  # Podział audio na segmenty
+        generation_kwargs["chunk_length_s"] = 30.0  
 
     asr_result = asr_pipeline(
         audio,
@@ -81,13 +81,11 @@ def transcribe(
             start_time = word_info['timestamp'][0]
             end_time = word_info['timestamp'][1]
 
-            # Jeśli różnica między startem a końcem jest zbyt mała, pomijamy takie słowo
             if start_time == end_time:
                 continue
             
-            # Podział na nowy segment, gdy segment przekroczy 5 sekund
             if end_time - current_segment['start'] > 5.0:  
-                current_segment['tokens'] = processor.tokenizer.encode(current_segment['text'].strip())  # Dodanie tokenów do segmentu
+                current_segment['tokens'] = processor.tokenizer.encode(current_segment['text'].strip())
                 segments.append(current_segment)
                 current_segment = {
                     'id': current_segment['id'] + 1,
@@ -109,10 +107,9 @@ def transcribe(
                 'probability': 0.0
             })
 
-        # Dodanie tokenów do ostatniego segmentu (jeśli ma tekst)
         if current_segment['text'].strip():
             current_segment['tokens'] = processor.tokenizer.encode(current_segment['text'].strip())
-        segments.append(current_segment)  # Dodaj ostatni segment
+        segments.append(current_segment)
     
     else:
         segments = [{
@@ -130,14 +127,11 @@ def transcribe(
         'language': language if language else "pl"
     }
 
-    # Zapis wyników
     output_file = StringIO()
     write_result(result, output_file, output)
     output_file.seek(0)
 
     return output_file
-
-
 
 def language_detection(audio):
     inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
