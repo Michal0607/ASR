@@ -12,17 +12,22 @@ processor_path = "openai/whisper-large-v2"
 
 peft_config = PeftConfig.from_pretrained(model_path)
 quant_config = BitsAndBytesConfig(load_in_8bit=True)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-base_model = WhisperForConditionalGeneration.from_pretrained(
-    peft_config.base_model_name_or_path,
-    quantization_config=quant_config
-)
+if torch.cuda.is_available():
+    base_model = WhisperForConditionalGeneration.from_pretrained(
+        peft_config.base_model_name_or_path,
+        quantization_config=quant_config
+    ).to(device)
+else:
+    base_model = WhisperForConditionalGeneration.from_pretrained(
+        peft_config.base_model_name_or_path
+    ).to(device)
 
 model = PeftModel.from_pretrained(base_model, model_path)
 
 processor = WhisperProcessor.from_pretrained(processor_path)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
 model_lock = Lock()
