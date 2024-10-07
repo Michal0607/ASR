@@ -18,11 +18,11 @@ if torch.cuda.is_available():
     base_model = WhisperForConditionalGeneration.from_pretrained(
         peft_config.base_model_name_or_path,
         quantization_config=quant_config
-    ).to(device)
+    )
 else:
     base_model = WhisperForConditionalGeneration.from_pretrained(
         peft_config.base_model_name_or_path
-    ).to(device)
+    )
 
 model = PeftModel.from_pretrained(base_model, model_path)
 

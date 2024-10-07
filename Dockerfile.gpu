@@ -78,6 +78,7 @@ COPY --from=swagger-ui /usr/share/nginx/html/swagger-ui-bundle.js swagger-ui-ass
 
 RUN poetry install
 RUN $POETRY_VENV/bin/pip install torch==1.13.1+cu117 -f https://download.pytorch.org/whl/torch
+RUN $POETRY_VENV/bin/pip install bitsandbytes
 
 EXPOSE 9000
 
