@@ -1,53 +1,31 @@
 import os
 from io import StringIO, BytesIO
 from threading import Lock
-from typing import BinaryIO, Union
+from typing import BinaryIO, Union, List, Dict
 import torch
-from transformers import (
-    WhisperForConditionalGeneration,
-    WhisperProcessor,
-    GenerationConfig,
-    AutomaticSpeechRecognitionPipeline,
-    BitsAndBytesConfig
-)
+from transformers import WhisperForConditionalGeneration, WhisperProcessor, pipeline, BitsAndBytesConfig
 from peft import PeftModel, PeftConfig
-from safetensors.torch import safe_open
 from whisper.utils import WriteTXT, WriteSRT, WriteVTT, WriteTSV, WriteJSON, ResultWriter
 
-# Ścieżka do Twojego dotrenowanego modelu
 model_path = "Michal0607/Whisper-v2-tuned" 
 processor_path = "openai/whisper-large-v2"
 
-# Ładowanie konfiguracji PEFT
 peft_config = PeftConfig.from_pretrained(model_path)
 quant_config = BitsAndBytesConfig(load_in_8bit=True)
 
-# Ładowanie bazowego modelu Whisper z parametrami autora
 base_model = WhisperForConditionalGeneration.from_pretrained(
     peft_config.base_model_name_or_path,
-    quantization_config=quant_config,            # Użycie 8-bitowej wersji modelu dla oszczędności pamięci
-    device_map="auto"             # Automatyczne mapowanie urządzeń
+    quantization_config=quant_config
 )
 
-# Ładowanie modelu PEFT
 model = PeftModel.from_pretrained(base_model, model_path)
 
-# Ładowanie procesora Whisper
 processor = WhisperProcessor.from_pretrained(processor_path)
 
-# Ustawienie urządzenia
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-# Blokada dla wątków
 model_lock = Lock()
-
-# Inicjalizacja pipeliny
-pipe = AutomaticSpeechRecognitionPipeline(
-    model=model,
-    tokenizer=processor.tokenizer,
-    feature_extractor=processor.feature_extractor
-)
 
 def transcribe(
         audio,
@@ -57,80 +35,120 @@ def transcribe(
         vad_filter: Union[bool, None],
         word_timestamps: Union[bool, None],
         output,
-):
-    try:
-        if language:
-            pipe.model.config.language = language
-        if task:
-            pipe.model.config.task = task
+    ):
+    if language:
+        model.config.language = language
+    if task:
+        model.config.task = task
 
-        generation_kwargs = {}
+    asr_pipeline = pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        device=0 if torch.cuda.is_available() else -1
+    )
 
-        if initial_prompt:
-            prompt_ids = processor.tokenizer.encode(initial_prompt, add_special_tokens=False)
-            generation_kwargs["decoder_prompt_ids"] = prompt_ids
+    generation_kwargs = {}
 
-        if word_timestamps:
-            generation_kwargs["return_timestamps"] = "word"
-            generation_kwargs["forced_decoder_ids"] = processor.get_decoder_prompt_ids(language=language, task=task)
+    if word_timestamps:
+        generation_kwargs["return_timestamps"] = "word"
+        generation_kwargs["chunk_length_s"] = 30.0  # Podział audio na segmenty
 
-        # Generowanie transkrypcji za pomocą pipeliny
-        result = pipe(audio, **generation_kwargs)
+    asr_result = asr_pipeline(
+        audio,
+        **generation_kwargs
+    )
 
-        text = result.get('text', "")
-        if word_timestamps:
-            word_timestamps_list = result.get('chunks', [])
+    text = asr_result['text']
+    segments = []
+    
+    if word_timestamps:
+        word_timestamps_list = asr_result.get('chunks', [])
+        current_segment = {
+            'id': 0,
+            'seek': 0,
+            'start': word_timestamps_list[0]['timestamp'][0],
+            'end': word_timestamps_list[0]['timestamp'][1],
+            'text': '',
+            'tokens': [],
+            'no_speech_prob': 0.0, 
+            'words': []
+        }
 
-            result = {'text': text, 'segments': []}
-            for i, word_info in enumerate(word_timestamps_list):
-                start_time = word_info.get('timestamp', [0.0, 0.0])[0]
-                end_time = word_info.get('timestamp', [0.0, 0.0])[1]
-                word = word_info.get('text', "")
-                result['segments'].append({
-                    'id': i,
+        for i, word_info in enumerate(word_timestamps_list):
+            word = word_info['text']
+            start_time = word_info['timestamp'][0]
+            end_time = word_info['timestamp'][1]
+
+            # Jeśli różnica między startem a końcem jest zbyt mała, pomijamy takie słowo
+            if start_time == end_time:
+                continue
+            
+            # Podział na nowy segment, gdy segment przekroczy 5 sekund
+            if end_time - current_segment['start'] > 5.0:  
+                current_segment['tokens'] = processor.tokenizer.encode(current_segment['text'].strip())  # Dodanie tokenów do segmentu
+                segments.append(current_segment)
+                current_segment = {
+                    'id': current_segment['id'] + 1,
                     'seek': 0,
                     'start': start_time,
                     'end': end_time,
-                    'text': word,
-                })
-        else:
-            result = {
-                'text': text,
-                'segments': [{
-                    'id': 0,
-                    'seek': 0,
-                    'start': 0.0,
-                    'end': 0.0,
-                    'text': text,
-                }]
-            }
+                    'text': '',
+                    'tokens': [],
+                    'no_speech_prob': 0.0,
+                    'words': []
+                }
 
-        output_file = StringIO()
-        write_result(result, output_file, output)
-        output_file.seek(0)
+            current_segment['text'] += word + ' '
+            current_segment['end'] = end_time
+            current_segment['words'].append({
+                'word': word,
+                'start': start_time,
+                'end': end_time,
+                'probability': 0.0
+            })
 
-        return output_file
+        # Dodanie tokenów do ostatniego segmentu (jeśli ma tekst)
+        if current_segment['text'].strip():
+            current_segment['tokens'] = processor.tokenizer.encode(current_segment['text'].strip())
+        segments.append(current_segment)  # Dodaj ostatni segment
+    
+    else:
+        segments = [{
+            'id': 0,
+            'seek': 0,
+            'start': 0.0,
+            'end': 0.0,
+            'text': text,
+            'no_speech_prob': 0.0,
+        }]
 
-    except Exception as e:
-        # Logowanie błędu (możesz dostosować sposób logowania)
-        print(f"Błąd podczas transkrypcji: {e}")
-        return None
+    result = {
+        'text': text,
+        'segments': segments,
+        'language': language if language else "pl"
+    }
+
+    # Zapis wyników
+    output_file = StringIO()
+    write_result(result, output_file, output)
+    output_file.seek(0)
+
+    return output_file
+
+
 
 def language_detection(audio):
-    try:
-        inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
-        input_features = inputs.input_features.to(device)
-        attention_mask = inputs.attention_mask.to(device)
+    inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
+    input_features = inputs.input_features.to(device)
 
-        with model_lock:
-            predicted_ids = model.generate(input_features, attention_mask=attention_mask, max_length=1)
-        detected_language = processor.tokenizer.decode(predicted_ids[0], skip_special_tokens=True)
+    with model_lock:
+        predicted_ids = model.generate(input_features=input_features, max_length=1)
+    predicted_tokens = processor.batch_decode(predicted_ids, skip_special_tokens=True)
+    detected_language = predicted_tokens[0]
 
-        return detected_language
-
-    except Exception as e:
-        print(f"Błąd podczas wykrywania języka: {e}")
-        return None
+    return detected_language
 
 def write_result(result, file: BinaryIO, output: Union[str, None]):
     options = {
