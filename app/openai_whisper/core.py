@@ -51,7 +51,6 @@ def transcribe(
         model=model,
         tokenizer=processor.tokenizer,
         feature_extractor=processor.feature_extractor,
-        device=0 if torch.cuda.is_available() else -1
     )
 
     generation_kwargs = {}
